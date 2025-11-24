@@ -194,7 +194,8 @@ class ModelConfig:
             
             # Download
             if self.local_model_path is None:
-                self.local_model_path = "./models"
+                # Check environment variable first, then use default
+                self.local_model_path = os.getenv("DIFFSYNTH_MODEL_CACHE", "./pretrained_models")
             if not skip_download:
                 downloaded_files = glob.glob(self.origin_file_pattern, root_dir=os.path.join(self.local_model_path, self.model_id))
                 if self.download_resource.lower() == "modelscope":

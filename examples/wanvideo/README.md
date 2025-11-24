@@ -447,6 +447,31 @@ The default video resolution in the training script is `480*832*81`. Increasing 
 
 </details>
 
+## Model Training on SLURM
+
+For SLURM clusters, training scripts need SLURM directives. The converted script includes resource allocations for 8 GPUs.
+
+**Submit Job:**
+
+```bash
+sbatch examples/wanvideo/model_training/t_lora/Wan2.2-T2V-A14B.sh
+```
+
+**Monitor Job:**
+
+```bash
+# Check job status
+squeue -u $USER
+
+# View output in real-time
+tail -f logs/wan2.2_lora_<JOB_ID>.out
+
+# Cancel job
+scancel <JOB_ID>
+```
+
+**Note:** Adjust `--partition` and `--gres` in the script to match your cluster configuration.
+
 ## Gallery
 
 1.3B text-to-video:
