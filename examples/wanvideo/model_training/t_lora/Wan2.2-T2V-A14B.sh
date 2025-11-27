@@ -1,39 +1,43 @@
 #!/bin/bash
-#SBATCH --job-name=wan2.2-t2v-lora
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:8
-#SBATCH --cpus-per-task=32
-#SBATCH --time=48:00:00
-#SBATCH --output=logs/wan2.2_lora_%j.out
-#SBATCH --error=logs/wan2.2_lora_%j.err
-#SBATCH --partition=main
 
-# Create logs directory if it doesn't exist
-mkdir -p logs
+# Get node rank from SLURM
+NODE_RANK=${SLURM_NODEID:-0}
+NNODES=${SLURM_JOB_NUM_NODES:-1}
+GPUS_PER_NODE=8
 
-# Print job information
-echo "Job started at: $(date)"
-echo "Running on node: $(hostname)"
-echo "Job ID: $SLURM_JOB_ID"
-echo "Number of GPUs: $SLURM_GPUS_ON_NODE"
+# Master address should be set by slurm_launch.sh
+export MASTER_ADDR=${MASTER_ADDR:-localhost}
+export MASTER_PORT=${MASTER_PORT:-29500}
 
 # Configure model cache directory
-# Option 1: Use environment variable (recommended)
-export DIFFSYNTH_MODEL_CACHE="./pretrained_models"
-echo "Model cache directory: $DIFFSYNTH_MODEL_CACHE"
+export DIFFSYNTH_MODEL_CACHE="${DIFFSYNTH_MODEL_CACHE:-./pretrained_models}"
 
-# Option 2: Use existing models from another location (e.g., shared storage)
-# export DIFFSYNTH_MODEL_CACHE="/scratch/shared/pretrained_models"
-# mkdir -p "$DIFFSYNTH_MODEL_CACHE"
+# Print node info
+echo "=============================================="
+echo "Node: $(hostname)"
+echo "Node rank: $NODE_RANK / $NNODES"
+echo "Master: $MASTER_ADDR:$MASTER_PORT"
+echo "GPUs per node: $GPUS_PER_NODE"
+echo "Model cache: $DIFFSYNTH_MODEL_CACHE"
+echo "=============================================="
 
+###############################################################################
 # Stage 1: High noise LoRA training [timesteps 875-1000]
+###############################################################################
+echo ""
+echo "Starting Stage 1: High noise LoRA training..."
+
 accelerate launch \
-  --mixed_precision bf16 \
-  --num_processes 8 \
+  --config_file examples/wanvideo/model_training/t_lora/accelerate_config_14B_lora_offload.yaml \
+  --num_machines $NNODES \
+  --num_processes $((NNODES * GPUS_PER_NODE)) \
+  --machine_rank $NODE_RANK \
+  --main_process_ip $MASTER_ADDR \
+  --main_process_port $MASTER_PORT \
+  --rdzv_backend static \
   examples/wanvideo/model_training/train.py \
-  --dataset_base_path /home/jonghwa/data/training_datasets/videoufo/ \
-  --dataset_metadata_path /home/jonghwa/data/training_datasets/videoufo/metadata.csv \
+  --dataset_base_path /home/jonghwa/data/training_datasets/openvid/ \
+  --dataset_metadata_path /home/jonghwa/data/training_datasets/openvid/metadata.csv \
   --max_pixels 921600 \
   --num_frames 49 \
   --dataset_repeat 1 \
@@ -46,16 +50,28 @@ accelerate launch \
   --lora_target_modules "q,k,v,o,ffn.0,ffn.2" \
   --lora_rank 32 \
   --max_timestep_boundary 0.417 \
-  --min_timestep_boundary 0
-# boundary corresponds to timesteps [875, 1000]
+  --min_timestep_boundary 0 \
+  --use_gradient_checkpointing_offload
 
+echo "Stage 1 completed at: $(date)"
+
+###############################################################################
 # Stage 2: Low noise LoRA training [timesteps 0-875)
+###############################################################################
+echo ""
+echo "Starting Stage 2: Low noise LoRA training..."
+
 accelerate launch \
-  --mixed_precision bf16 \
-  --num_processes 8 \
+  --config_file examples/wanvideo/model_training/t_lora/accelerate_config_14B_lora_offload.yaml \
+  --num_machines $NNODES \
+  --num_processes $((NNODES * GPUS_PER_NODE)) \
+  --machine_rank $NODE_RANK \
+  --main_process_ip $MASTER_ADDR \
+  --main_process_port $MASTER_PORT \
+  --rdzv_backend static \
   examples/wanvideo/model_training/train.py \
-  --dataset_base_path /home/jonghwa/data/training_datasets/videoufo/ \
-  --dataset_metadata_path /home/jonghwa/data/training_datasets/videoufo/metadata.csv \
+  --dataset_base_path /home/jonghwa/data/training_datasets/openvid/ \
+  --dataset_metadata_path /home/jonghwa/data/training_datasets/openvid/metadata.csv \
   --max_pixels 921600 \
   --num_frames 49 \
   --dataset_repeat 1 \
@@ -68,9 +84,8 @@ accelerate launch \
   --lora_target_modules "q,k,v,o,ffn.0,ffn.2" \
   --lora_rank 32 \
   --max_timestep_boundary 1 \
-  --min_timestep_boundary 0.417
-# boundary corresponds to timesteps [0, 875)
+  --min_timestep_boundary 0.417 \
+  --use_gradient_checkpointing_offload
 
-# Print job completion information
-echo "Job completed at: $(date)"
-echo "Total runtime: $SECONDS seconds"
+echo "Stage 2 completed at: $(date)"
+echo "All training completed!"
